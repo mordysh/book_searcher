@@ -19,6 +19,7 @@ SITES = [
 
 def clean_filename(filename):
     name = os.path.splitext(filename)[0]
+    # Remove common junk but keep Unicode letters
     name = re.sub(r'[\(\)\[\]\._-]', ' ', name)
     return name.strip()
 
@@ -32,6 +33,7 @@ def get_book_details(url, site_name):
         logging.debug(f"Scraping details from: {url}")
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=10)
+        response.encoding = 'utf-8' # Ensure UTF-8
         if response.status_code != 200:
             logging.warning(f"Failed to fetch {url}: Status {response.status_code}")
             return None
@@ -109,8 +111,15 @@ def organize_file(book_data, output_dir):
     author = result['author'] or "UnknownAuthor"
     title = result['title'] or "UnknownTitle"
     
-    safe_author = re.sub(r'[\/*?:"<>|]', "", author).replace(" ", "_")
-    safe_title = re.sub(r'[\/*?:"<>|]', "", title).replace(" ", "_")
+    # Preserve Unicode letters but remove illegal filesystem chars
+    def safe_name(name):
+        # Keep any character that is a letter/digit (including Unicode) or space
+        # Then replace spaces with underscores and remove illegal chars
+        name = re.sub(r'[\/*?:"<>|]', "", name)
+        return name.strip().replace(" ", "_")
+
+    safe_author = safe_name(author)
+    safe_title = safe_name(title)
     
     ext = os.path.splitext(file_path)[1]
     new_filename = f"{safe_author}_{safe_title}{ext}"
@@ -136,7 +145,7 @@ def main():
     elif args.verbose == 2:
         level = logging.DEBUG
     else:
-        level = logging.DEBUG # Or more detailed if needed
+        level = logging.DEBUG
 
     logging.basicConfig(level=level, format='%(levelname)s: %(message)s')
 
