@@ -9,6 +9,7 @@ import json
 import argparse
 import re
 import logging
+from datetime import datetime
 
 # Sites to search
 SITES = [
@@ -19,7 +20,6 @@ SITES = [
 
 def clean_filename(filename):
     name = os.path.splitext(filename)[0]
-    # Remove common junk but keep Unicode letters
     name = re.sub(r'[\(\)\[\]\._-]', ' ', name)
     return name.strip()
 
@@ -33,7 +33,7 @@ def get_book_details(url, site_name):
         logging.debug(f"Scraping details from: {url}")
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=10)
-        response.encoding = 'utf-8' # Ensure UTF-8
+        response.encoding = 'utf-8'
         if response.status_code != 200:
             logging.warning(f"Failed to fetch {url}: Status {response.status_code}")
             return None
@@ -95,32 +95,28 @@ def process_book(file_path):
         logging.debug(f"Trying site: {site['name']} for '{query}'")
         result = search_book_on_site(query, site)
         if result:
-            return {"file": file_path, "result": result}
+            return {"file": file_path, "original_filename": filename, "result": result}
     
     logging.warning(f"No match found for: {filename}")
-    return {"file": file_path, "result": None}
+    return {"file": file_path, "original_filename": filename, "result": None}
 
 def organize_file(book_data, output_dir):
     file_path = book_data['file']
     result = book_data['result']
     
     if not result:
-        return
+        return None
 
     site_name = result['site']
     author = result['author'] or "UnknownAuthor"
     title = result['title'] or "UnknownTitle"
     
-    # Preserve Unicode letters but remove illegal filesystem chars
     def safe_name(name):
-        # Keep any character that is a letter/digit (including Unicode) or space
-        # Then replace spaces with underscores and remove illegal chars
         name = re.sub(r'[\/*?:"<>|]', "", name)
         return name.strip().replace(" ", "_")
 
     safe_author = safe_name(author)
     safe_title = safe_name(title)
-    
     ext = os.path.splitext(file_path)[1]
     new_filename = f"{safe_author}_{safe_title}{ext}"
     
@@ -128,8 +124,13 @@ def organize_file(book_data, output_dir):
     os.makedirs(target_dir, exist_ok=True)
     
     new_path = os.path.join(target_dir, new_filename)
-    shutil.move(file_path, new_path)
-    logging.info(f"Moved: {new_filename} -> {target_dir}")
+    try:
+        shutil.move(file_path, new_path)
+        logging.info(f"Moved: {new_filename} -> {target_dir}")
+        return new_path
+    except Exception as e:
+        logging.error(f"Failed to move {file_path}: {e}")
+        return None
 
 def main():
     parser = argparse.ArgumentParser(description="Search for ebook URLs and organize files.")
@@ -138,15 +139,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="count", default=0, help="Increase verbosity (-v, -vv, -vvv)")
     args = parser.parse_args()
 
-    if args.verbose == 0:
-        level = logging.WARNING
-    elif args.verbose == 1:
-        level = logging.INFO
-    elif args.verbose == 2:
-        level = logging.DEBUG
-    else:
-        level = logging.DEBUG
-
+    level = {0: logging.WARNING, 1: logging.INFO, 2: logging.DEBUG}.get(args.verbose, logging.DEBUG)
     logging.basicConfig(level=level, format='%(levelname)s: %(message)s')
 
     if not os.path.exists(args.input):
@@ -163,8 +156,24 @@ def main():
     with ThreadPoolExecutor(max_workers=args.threads) as executor:
         results = list(executor.map(process_book, files))
 
+    final_metadata = []
     for book_data in results:
-        organize_file(book_data, args.input)
+        new_path = organize_file(book_data, args.input)
+        entry = {
+            "original_filename": book_data['original_filename'],
+            "new_path": new_path,
+            "found": book_data['result'] is not None,
+            "metadata": book_data['result'],
+            "timestamp": datetime.now().isoformat()
+        }
+        final_metadata.append(entry)
+
+    # Save to JSON
+    json_path = os.path.join(args.input, "search_results.json")
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(final_metadata, f, ensure_ascii=False, indent=4)
+    
+    logging.info(f"Results saved to {json_path}")
 
 if __name__ == "__main__":
     main()
