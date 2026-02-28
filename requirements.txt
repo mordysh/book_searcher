@@ -3,3 +3,4 @@ beautifulsoup4
 googlesearch-python
 thefuzz
 python-Levenshtein
+ollama
