@@ -4,3 +4,4 @@ googlesearch-python
 thefuzz
 python-Levenshtein
 ollama
+colorama
